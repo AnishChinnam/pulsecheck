@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pulsecheck-monitor"
+version = "0.1.0"
+description = "A local API reliability monitor with persistent incident tracking."
+requires-python = ">=3.11"
+dependencies = ["fastapi>=0.115,<1", "httpx>=0.27,<1", "uvicorn>=0.30,<1"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8,<10"]
+
+[project.scripts]
+pulsecheck = "pulsecheck.__main__:main"
+
+[tool.setuptools.package-data]
+pulsecheck = ["static/*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
