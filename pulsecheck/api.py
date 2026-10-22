@@ -3,8 +3,10 @@ import csv
 import io
 import os
 import sqlite3
+import time
 from contextlib import asynccontextmanager, suppress
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import httpx
 from fastapi import FastAPI, HTTPException, Query
@@ -23,7 +25,9 @@ def csv_cell(value):
     return "'" + text if text.startswith(("=", "+", "-", "@", "\t", "\r")) else text
 
 
-def create_app(db_path=None, settings=None, *, scheduler=True, demo=False, base_url="http://127.0.0.1:8081", transport=None):
+def create_app(db_path=None, settings=None, *, scheduler=True, demo=False, public_demo=False, base_url="http://127.0.0.1:8081", transport=None):
+    if public_demo and (not demo or urlsplit(base_url).hostname != "127.0.0.1"):
+        raise ValueError("Public demo requires demo mode and a loopback base URL")
     store = Store(db_path or os.getenv("PULSECHECK_DB", "data/pulsecheck.db"))
     settings = settings or Settings(allowed_hosts=tuple(x.strip() for x in os.getenv("PULSECHECK_ALLOWED_HOSTS", "127.0.0.1,localhost").split(",") if x.strip()))
 
@@ -50,8 +54,31 @@ def create_app(db_path=None, settings=None, *, scheduler=True, demo=False, base_
 
     app = FastAPI(title="PulseCheck", version="0.1.0", lifespan=lifespan)
     app.state.demo_down = False
+    app.state.last_public_action = {}
     app.state.store = store
     app.mount("/static", StaticFiles(directory=STATIC), name="static")
+
+    @app.middleware("http")
+    async def demo_guard(request, call_next):
+        if public_demo and request.method not in {"GET", "HEAD", "OPTIONS"}:
+            origin = request.headers.get("origin")
+            if origin and urlsplit(origin).netloc != request.headers.get("host"):
+                from fastapi.responses import JSONResponse
+                return JSONResponse({"detail": "Use the demo controls on this website."}, status_code=403)
+        response = await call_next(request)
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["Referrer-Policy"] = "same-origin"
+        response.headers["Content-Security-Policy"] = "frame-ancestors 'none'"
+        return response
+
+    def demo_action(action):
+        if not public_demo:
+            return
+        now = time.monotonic()
+        last = app.state.last_public_action.get(action)
+        if last is not None and now - last < 2:
+            raise HTTPException(429, "Please wait two seconds between demo actions.", headers={"Retry-After": "2"})
+        app.state.last_public_action[action] = now
 
     @app.get("/", include_in_schema=False)
     async def index():
@@ -65,12 +92,14 @@ def create_app(db_path=None, settings=None, *, scheduler=True, demo=False, base_
     @app.get("/api/summary")
     async def summary():
         result = await asyncio.to_thread(store.summary)
-        return {**result, "demo": demo, "demo_down": app.state.demo_down if demo else None,
+        return {**result, "demo": demo, "public_demo": public_demo, "demo_down": app.state.demo_down if demo else None,
                 "interval_seconds": settings.interval_seconds, "failure_threshold": settings.failure_threshold,
                 "recovery_threshold": settings.recovery_threshold}
 
     @app.post("/api/monitors", status_code=201)
     async def add_monitor(body: MonitorInput):
+        if public_demo:
+            raise HTTPException(403, "Public demo uses fixed sample services. Run locally to add your own monitors.")
         try:
             app.state.service.validate_target(body)
         except ValueError as error:
@@ -82,6 +111,8 @@ def create_app(db_path=None, settings=None, *, scheduler=True, demo=False, base_
 
     @app.put("/api/monitors/{monitor_id}/enabled")
     async def enabled(monitor_id: int, body: EnabledInput):
+        if public_demo:
+            raise HTTPException(403, "Monitor configuration is read-only in the public demo.")
         result = await asyncio.to_thread(store.set_enabled, monitor_id, body.enabled)
         if result is None:
             raise HTTPException(404, "Monitor not found")
@@ -95,6 +126,7 @@ def create_app(db_path=None, settings=None, *, scheduler=True, demo=False, base_
 
     @app.post("/api/checks/run")
     async def run():
+        demo_action("checks")
         try:
             return {"results": await app.state.service.run_once()}
         except RunInProgress as error:
@@ -118,6 +150,7 @@ def create_app(db_path=None, settings=None, *, scheduler=True, demo=False, base_
     if demo:
         @app.post("/api/demo/outage")
         async def outage(body: OutageInput):
+            demo_action("outage")
             app.state.demo_down = body.down
             return {"down": body.down}
 

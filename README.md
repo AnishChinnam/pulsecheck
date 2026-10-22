@@ -1,6 +1,6 @@
 # PulseCheck
 
-A Python API reliability monitor that turns failed HTTP checks into a persistent incident timeline. Designed as a local backend portfolio project: FastAPI, asyncio, HTTPX, SQLite and pytest.
+A Python API reliability monitor that turns failed HTTP checks into a persistent incident timeline. A backend portfolio project with a restricted public demo: FastAPI, asyncio, HTTPX, SQLite and pytest.
 
 ![PulseCheck dashboard showing checks against local demo services](docs/dashboard.jpg)
 
@@ -81,7 +81,7 @@ An optional GitHub Actions workflow example at `docs/ci-tests.yml.example` runs 
 
 ## Scope and tradeoffs
 
-- Local and trusted-user only. The supplied CLI binds to loopback. There is no authentication, tenant isolation, outbound proxy sandbox or DNS-rebinding defense. Do not expose this monitor API publicly as-is.
+- The normal CLI remains local and trusted-user only. It has no authentication or tenant isolation. The separate public demo entry point disables monitor creation/configuration, fixes probes to three loopback sample endpoints, rejects cross-origin mutations and limits manual actions globally. It is a shared educational demo, not an authenticated multi-user monitoring product.
 - Use one Uvicorn worker. Each process would otherwise own a scheduler. A larger deployment would need an external scheduler or distributed lease and a shared database.
 - SQLite and a rolling-window query are a deliberate small-project choice. There is no retention/compaction job yet; the history grows until you manage the database.
 - The scheduler waits a fixed interval after a cycle finishes. It does not guarantee wall-clock execution times or catch up checks missed while the process was stopped.
@@ -94,3 +94,33 @@ An optional GitHub Actions workflow example at `docs/ci-tests.yml.example` runs 
 - [SQLite partial indexes](https://www.sqlite.org/partialindex.html)
 
 Developed with AI assistance. See [INTERVIEW-GUIDE.md](INTERVIEW-GUIDE.md) for an explanation and exercises to complete before presenting the project in interviews.
+
+## Deploy the public demo
+
+`render.yaml` configures one **Free** Render Python web service with `/health`
+as its health check. Create a Blueprint from this repository or a Web Service
+using these settings:
+
+- Build: `pip install -r requirements.lock && pip install -e . --no-deps`
+- Start: `python -m pulsecheck.deploy`
+- Python: `3.13.5`; instance: **Free**; health check: `/health`
+
+The deploy entry point binds `0.0.0.0:$PORT`, runs one worker, seeds fixed
+loopback services, checks every 30 seconds and disables monitor changes.
+The outage toggle and manual checks remain interactive, with a global
+two-second cooldown per action. All visitors share the same demo state.
+This endpoint cannot be used to register arbitrary outbound requests.
+
+Free Render services sleep after 15 minutes without inbound traffic and may
+take about a minute to wake. SQLite data is ephemeral: history can reset on
+sleep, restart or redeploy. This is disclosed in the UI. The local version
+continues to persist data in the database you choose. This demo is not an
+always-on uptime service or a promise of production availability.
+
+A Dockerfile is also supplied for hosts with container support. Docker is
+not required for the Render Python deployment. Run `python -m pytest -q`
+before deploying; inspect `/health`, the dashboard and `/docs`, then test
+a simulated outage and recovery.
+
+References: [Render FastAPI deployment](https://render.com/docs/deploy-fastapi),
+[Free instance limits](https://render.com/docs/free).
