@@ -115,6 +115,35 @@ class Store:
         with self.connect() as db:
             return [dict(row) for row in db.execute("SELECT i.*,m.name FROM incidents i JOIN monitors m ON m.id=i.monitor_id ORDER BY i.id DESC LIMIT ?", (limit,))]
 
+    def analytics(self, hours=24, now=None):
+        as_of = datetime.fromisoformat(now) if now else datetime.now(timezone.utc)
+        end = as_of.isoformat(timespec="milliseconds")
+        cutoff = (as_of-timedelta(hours=hours)).isoformat(timespec="milliseconds")
+        monitors=[]
+        with self.connect() as db:
+            for row in db.execute("SELECT id FROM monitors ORDER BY id").fetchall():
+                samples=[dict(r) for r in db.execute("SELECT checked_at,ok,latency_ms,status_code,attempts_used,error FROM checks WHERE monitor_id=? AND checked_at>=? AND checked_at<=? ORDER BY checked_at,id",(row['id'],cutoff,end))]
+                successful=sorted(s['latency_ms'] for s in samples if s['ok'])
+                # Time buckets retain empty intervals; no data is never 100% success.
+                buckets=[{'samples':0,'successes':0,'latency_sum':0,'latency_count':0} for _ in range(24)]
+                for sample in samples:
+                    index=min(23,max(0,int((datetime.fromisoformat(sample['checked_at'])-datetime.fromisoformat(cutoff)).total_seconds()/(hours*3600)*24)))
+                    bucket=buckets[index];bucket['samples']+=1;bucket['successes']+=sample['ok']
+                    if sample['ok']:bucket['latency_sum']+=sample['latency_ms'];bucket['latency_count']+=1
+                for i,bucket in enumerate(buckets):
+                    bucket['at']=(datetime.fromisoformat(cutoff)+timedelta(hours=hours*i/24)).isoformat()
+                    bucket['avg_ms']=round(bucket.pop('latency_sum')/bucket['latency_count'],2) if bucket['latency_count'] else None
+                    bucket.pop('latency_count')
+                monitors.append({'monitor_id':row['id'],'checks':len(samples),'failures':len(samples)-len(successful),'success_rate':round(100*len(successful)/len(samples),2) if samples else None,'average_ms':round(sum(successful)/len(successful),2) if successful else None,'p95_ms':round(successful[math.ceil(.95*len(successful))-1],2) if successful else None,'last_sample':samples[-1] if samples else None,'recent':samples[-40:],'buckets':buckets})
+        return {'as_of':end,'window_hours':hours,'monitors':monitors}
+
+    def prune(self, days=7):
+        cutoff=(datetime.now(timezone.utc)-timedelta(days=days)).isoformat(timespec="milliseconds")
+        with self.connect() as db:
+            checks=db.execute('DELETE FROM checks WHERE checked_at<?',(cutoff,)).rowcount
+            incidents=db.execute('DELETE FROM incidents WHERE resolved_at IS NOT NULL AND resolved_at<?',(cutoff,)).rowcount
+        return {'checks':checks,'incidents':incidents}
+
     def summary(self, now: str | None = None) -> dict:
         as_of = datetime.fromisoformat(now) if now else datetime.now(timezone.utc)
         cutoff = (as_of - timedelta(hours=24)).isoformat(timespec="milliseconds")

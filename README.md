@@ -92,7 +92,7 @@ An optional GitHub Actions workflow example at `docs/ci-tests.yml.example` runs 
 
 - The normal CLI remains local and trusted-user only. It has no authentication or tenant isolation. The separate public demo entry point disables monitor creation/configuration, fixes probes to three loopback sample endpoints, rejects cross-origin mutations and limits manual actions globally. It is a shared educational demo, not an authenticated multi-user monitoring product.
 - Use one Uvicorn worker. Each process would otherwise own a scheduler. A larger deployment would need an external scheduler or distributed lease and a shared database.
-- SQLite and a rolling-window query are a deliberate small-project choice. There is no retention/compaction job yet; the history grows until you manage the database.
+- SQLite and a rolling-window query are a deliberate small-project choice. Public demo housekeeping prunes checks and resolved incidents older than seven days hourly; open incidents are preserved. The local CLI does not delete history automatically. SQLite file compaction is not automatic.
 - The scheduler waits a fixed interval after a cycle finishes. It does not guarantee wall-clock execution times or catch up checks missed while the process was stopped.
 - No alert delivery or response-body assertions yet. It currently checks HTTP status and headers, not application correctness or end-to-end user flows.
 
@@ -133,3 +133,21 @@ a simulated outage and recovery.
 
 References: [Render FastAPI deployment](https://render.com/docs/deploy-fastapi),
 [Free instance limits](https://render.com/docs/free).
+
+## Investigation dashboard
+
+- Select 1-hour, 6-hour, 24-hour or 7-day report windows. Metrics show real
+  observations only; empty time buckets remain empty.
+- Search services, filter their current state, and inspect a service for the
+  latest 120 check results, HTTP statuses, retry counts, latency chart and incidents.
+- Filter open/resolved incidents and inspect their measured open/recovery times.
+- The fleet chart groups recorded observations into 24 equal time buckets.
+  Recent-result bars represent observations, not elapsed uptime.
+- Toggle auto-refresh or light appearance; background tabs skip periodic refreshes.
+
+`GET /api/analytics?hours=24` supplies per-monitor window metrics and buckets.
+`GET /api/monitors/{id}` supplies configuration, recent checks and incident history.
+The existing `/api/summary` and CSV endpoints retain their 24-hour semantics.
+Latency averages/P95 exclude failed observations; missing samples are null.
+39 automated tests cover the backend, including window boundaries, failed latency
+population, empty buckets, retention, public restrictions and deployment settings.

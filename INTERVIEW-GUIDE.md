@@ -30,7 +30,7 @@ Do not claim customer adoption, production uptime, business impact or a throughp
 
 **Is the success rate the same as uptime?** No. It is a ratio of sampled checks. If the app is stopped for an hour, that hour has no observations. It does not become 100% uptime or downtime in this metric.
 
-**How would you scale it?** Separate API, scheduling and worker processes. Use a durable task queue or lease to prevent duplicate ownership, a shared database such as PostgreSQL, and retention/aggregation. Those are possible next steps, not implemented capabilities.
+**How would you scale it?** Separate API, scheduling and worker processes. Use a durable task queue or lease to prevent duplicate ownership, a shared database such as PostgreSQL, and long-term aggregation. Public demo retention and windowed analytics are implemented; distributed scheduling and PostgreSQL remain possible next steps.
 
 **What would be required before public deployment?** Authentication and authorization, stronger outbound network controls, DNS/IP checks, rate limits, secret handling, database backup and a single scheduling authority. The current project is intentionally a loopback demo.
 
@@ -41,6 +41,6 @@ Do not claim customer adoption, production uptime, business impact or a throughp
 - Add one test that proves scheduler cancellation closes resources.
 - Explain why a transport timeout and a total attempt deadline are different.
 - Explain what a partial unique index prevents and why an application-only check would be weaker.
-- Add a retention command that prunes old checks without deleting incident history.
+- Explain the implemented public-demo retention policy: old checks and resolved incidents are pruned, while open incidents are preserved. The local CLI retains its history.
 
 Only add completed extensions or newly measured results to the resume. Keep a short development log of changes you personally understand and can reproduce.

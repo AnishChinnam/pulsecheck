@@ -44,6 +44,11 @@ def create_app(db_path=None, settings=None, *, scheduler=True, demo=False, publi
             service = MonitorService(store, client, settings)
             app.state.service = service
             task = asyncio.create_task(service.schedule()) if scheduler else None
+            async def housekeeping():
+                while True:
+                    await asyncio.to_thread(store.prune, 7)
+                    await asyncio.sleep(3600)
+            cleanup = asyncio.create_task(housekeeping()) if public_demo else None
             try:
                 yield
             finally:
@@ -51,6 +56,10 @@ def create_app(db_path=None, settings=None, *, scheduler=True, demo=False, publi
                     task.cancel()
                     with suppress(asyncio.CancelledError):
                         await task
+                if cleanup:
+                    cleanup.cancel()
+                    with suppress(asyncio.CancelledError):
+                        await cleanup
 
     app = FastAPI(title="PulseCheck", version="0.1.0", lifespan=lifespan)
     app.state.demo_down = False
@@ -95,6 +104,18 @@ def create_app(db_path=None, settings=None, *, scheduler=True, demo=False, publi
         return {**result, "demo": demo, "public_demo": public_demo, "demo_down": app.state.demo_down if demo else None,
                 "interval_seconds": settings.interval_seconds, "failure_threshold": settings.failure_threshold,
                 "recovery_threshold": settings.recovery_threshold}
+
+    @app.get("/api/analytics")
+    async def analytics(hours: int = Query(24, ge=1, le=168)):
+        return await asyncio.to_thread(store.analytics, hours)
+
+    @app.get("/api/monitors/{monitor_id}")
+    async def monitor_detail(monitor_id: int):
+        monitor = next((m for m in await asyncio.to_thread(store.monitors) if m['id'] == monitor_id), None)
+        if monitor is None:
+            raise HTTPException(404, "Monitor not found")
+        checks, incidents = await asyncio.gather(asyncio.to_thread(store.history, monitor_id, 120), asyncio.to_thread(store.incidents, 500))
+        return {"monitor":monitor,"checks":checks,"incidents":[i for i in incidents if i['monitor_id']==monitor_id]}
 
     @app.post("/api/monitors", status_code=201)
     async def add_monitor(body: MonitorInput):
