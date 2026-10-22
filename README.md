@@ -4,6 +4,15 @@ A Python API reliability monitor that turns failed HTTP checks into a persistent
 
 ![PulseCheck dashboard showing checks against local demo services](docs/dashboard.jpg)
 
+## Public demo
+
+**[Open PulseCheck](https://pulsecheck-anish.onrender.com/)** · [Interactive API docs](https://pulsecheck-anish.onrender.com/docs)
+
+Hosted on Render’s Free instance. The first visit after inactivity may take
+about a minute to wake. This is a shared sample environment: visitors can
+simulate an outage and recovery, while monitor configuration is read-only.
+History can reset when the instance sleeps, restarts or redeploys.
+
 ## Try the working demo
 
 Python 3.11 or newer:
